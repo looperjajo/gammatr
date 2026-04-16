@@ -1,50 +1,8 @@
 /**
  * @file app.js
- * @description Punto de entrada de GammaTR. Estado global, inicialización y orquestación de módulos.
+ * @description Punto de entrada de GammaTR. Inicialización y orquestación de módulos.
+ * El estado global se define en state.js (carga antes que este archivo).
  */
-
-// ===== ESTADO GLOBAL =====
-window.GammaTR = {
-  // Pares por defecto
-  pairs: ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','DOGEUSDT',
-          'ADAUSDT','XRPUSDT','TRXUSDT','LINKUSDT','WIFUSDT'],
-
-  // Precios y datos en vivo (par -> datos)
-  priceData: {},
-
-  // Klines cargadas por par+timeframe (clave: "BTCUSDT_5m")
-  klineCache: {},
-
-  // Indicadores calculados (par -> indicadores)
-  indicators: {},
-
-  // Señales activas (par -> señal)
-  signals: {},
-
-  // Alertas activas
-  alerts: [],
-
-  // Par e intervalo seleccionados en el chart
-  selectedPair: 'BTCUSDT',
-  selectedTimeframe: '5m',
-
-  // Historial de señales (local + Supabase)
-  signalHistory: [],
-
-  // Configuración de usuario
-  config: {
-    geminiKey:    '',
-    supabaseUrl:  '',
-    supabaseKey:  '',
-    theme:        'dark',
-  },
-
-  // Referencia al chart de Chart.js
-  chart: null,
-
-  // Swipe tracking para el chart
-  touchStartX: 0,
-};
 
 const App = window.GammaTR;
 

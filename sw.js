@@ -12,6 +12,7 @@ const STATIC_ASSETS = [
   './',
   './index.html',
   './css/style.css',
+  './js/state.js',
   './js/app.js',
   './js/binance.js',
   './js/indicators.js',
