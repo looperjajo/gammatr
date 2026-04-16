@@ -5,7 +5,7 @@
  * Permite uso offline parcial (UI carga, datos en vivo no disponibles).
  */
 
-const CACHE_NAME = 'gammatr-v1.0.0';
+const CACHE_NAME = 'gammatr-v1.0.1';
 
 // Assets a cachear en la instalación
 const STATIC_ASSETS = [
@@ -36,7 +36,7 @@ const CDN_ORIGINS = [
 
 // ===== INSTALACIÓN =====
 self.addEventListener('install', event => {
-  console.log('[SW] Instalando GammaTR v1.0.0...');
+  console.log('[SW] Instalando GammaTR v1.0.1...');
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
       // Cachear assets estáticos ignorando los que fallen (CDN)
