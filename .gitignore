@@ -1,0 +1,52 @@
+# ============================================================
+# GammaTR — .gitignore
+# NUNCA subir claves, secrets ni archivos sensibles al repo
+# ============================================================
+
+# Variables de entorno (NUNCA subir)
+.env
+.env.local
+.env.production
+*.key
+*.pem
+*.secret
+
+# Dependencias de Node (si se añaden en el futuro)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Sistema operativo
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDEs
+.vscode/settings.json
+.idea/
+*.suo
+*.user
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+*.log
+logs/
+
+# Temporales
+*.tmp
+*.temp
+*.swp
+*~
+
+# Build outputs (si se añaden en el futuro)
+dist/
+build/
+
+# El .env.example SÍ se sube (contiene solo placeholders)
+!.env.example

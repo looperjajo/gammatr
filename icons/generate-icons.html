@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>GammaTR — Generar Iconos PWA</title>
+  <style>
+    body { font-family: monospace; background: #0a0e1a; color: #e2e8f0; padding: 40px; }
+    canvas { border: 1px solid #1e2d45; margin: 10px; }
+    button { background: #00d4a0; color: #0a0e1a; border: none; padding: 12px 24px;
+             font-size: 1rem; font-weight: bold; cursor: pointer; border-radius: 6px; margin: 8px; }
+    .desc { color: #64748b; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <h2>γ GammaTR — Generador de Iconos PWA</h2>
+  <p class="desc">Abre este archivo en un navegador. Los iconos se generan en canvas y puedes descargarlos como PNG.</p>
+
+  <div>
+    <canvas id="c192" width="192" height="192"></canvas>
+    <canvas id="c512" width="512" height="512"></canvas>
+  </div>
+  <br>
+  <button onclick="download('c192','icon-192.png')">Descargar icon-192.png</button>
+  <button onclick="download('c512','icon-512.png')">Descargar icon-512.png</button>
+  <p class="desc">Guarda los archivos descargados en esta misma carpeta <code>icons/</code></p>
+
+  <script>
+    function drawIcon(canvasId) {
+      const canvas = document.getElementById(canvasId);
+      const s = canvas.width;
+      const ctx = canvas.getContext('2d');
+
+      // Fondo oscuro con esquinas redondeadas
+      ctx.fillStyle = '#0a0e1a';
+      roundRect(ctx, 0, 0, s, s, s * 0.18);
+      ctx.fill();
+
+      // Degradado sutil de fondo
+      const grad = ctx.createRadialGradient(s*0.5, s*0.4, 0, s*0.5, s*0.5, s*0.6);
+      grad.addColorStop(0, 'rgba(0,212,160,0.08)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      roundRect(ctx, 0, 0, s, s, s * 0.18);
+      ctx.fill();
+
+      // Dibujar γ (gamma)
+      const lw = s * 0.09;
+      ctx.strokeStyle = '#00d4a0';
+      ctx.lineWidth = lw;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      // Glow effect
+      ctx.shadowColor = '#00d4a0';
+      ctx.shadowBlur = s * 0.08;
+
+      const p = s * 0.22; // padding
+      const cx = s / 2;
+
+      // Horizontal top bar
+      ctx.beginPath();
+      ctx.moveTo(p, p * 1.2);
+      ctx.lineTo(s - p, p * 1.2);
+      ctx.stroke();
+
+      // Left diagonal down to center
+      ctx.beginPath();
+      ctx.moveTo(p, p * 1.2);
+      ctx.lineTo(cx, s * 0.75);
+      ctx.stroke();
+
+      // Right diagonal down to center
+      ctx.beginPath();
+      ctx.moveTo(s - p, p * 1.2);
+      ctx.lineTo(cx, s * 0.75);
+      ctx.stroke();
+
+      // Vertical stem down
+      ctx.beginPath();
+      ctx.moveTo(cx, s * 0.75);
+      ctx.lineTo(cx, s - p * 1.1);
+      ctx.stroke();
+
+      // Puntos de brillo en esquinas del trazo horizontal
+      ctx.shadowBlur = s * 0.06;
+      ctx.fillStyle = '#00d4a0';
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      ctx.arc(p, p * 1.2, lw * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(s - p, p * 1.2, lw * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    }
+
+    function download(canvasId, filename) {
+      const canvas = document.getElementById(canvasId);
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }
+
+    // Generar al cargar
+    drawIcon('c192');
+    drawIcon('c512');
+  </script>
+</body>
+</html>

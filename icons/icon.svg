@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Fondo oscuro -->
+  <rect width="512" height="512" rx="96" fill="#0a0e1a"/>
+
+  <!-- Letra gamma γ estilizada en verde #00d4a0 -->
+  <!-- Trazo izquierdo diagonal hacia abajo -->
+  <line x1="128" y1="130" x2="256" y2="340" stroke="#00d4a0" stroke-width="42" stroke-linecap="round"/>
+  <!-- Trazo derecho diagonal hacia abajo (más largo, el pie del gamma) -->
+  <line x1="256" y1="340" x2="256" y2="420" stroke="#00d4a0" stroke-width="42" stroke-linecap="round"/>
+  <!-- Trazo horizontal superior -->
+  <line x1="128" y1="130" x2="384" y2="130" stroke="#00d4a0" stroke-width="42" stroke-linecap="round"/>
+  <!-- Trazo derecho superior diagonal hacia el punto de unión -->
+  <line x1="384" y1="130" x2="256" y2="340" stroke="#00d4a0" stroke-width="42" stroke-linecap="round"/>
+
+  <!-- Punto de brillo / acento decorativo -->
+  <circle cx="384" cy="130" r="24" fill="#00d4a0" opacity="0.6"/>
+  <circle cx="128" cy="130" r="24" fill="#00d4a0" opacity="0.6"/>
+</svg>

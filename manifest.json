@@ -1,0 +1,58 @@
+{
+  "name": "GammaTR — Crypto Trading IA",
+  "short_name": "GammaTR",
+  "description": "Trading de criptomonedas con señales IA en tiempo real. WebSocket Binance + Gemini AI.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "lang": "es",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Alertas",
+      "short_name": "Alertas",
+      "description": "Ir directamente a gestión de alertas",
+      "url": "./index.html#alerts",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Señales IA",
+      "short_name": "Señales",
+      "description": "Analizar con Gemini AI",
+      "url": "./index.html#signals",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "icons/screenshot-mobile.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Dashboard de precios en tiempo real"
+    }
+  ]
+}
