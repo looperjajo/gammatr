@@ -1,293 +1,171 @@
 /**
  * @file alerts.js
- * @description Sistema de alertas: verificación de condiciones, notificaciones push,
- * sonido y feedback visual. Se ejecuta cada vez que llegan precios/indicadores nuevos.
- * Expone window.Alerts.
+ * @description Sistema de alertas: 10 tipos, notificaciones push, sonido Web Audio, feedback visual.
  */
 window.Alerts = (() => {
 
   const App = window.GammaTR;
+  const COOLDOWN = 60_000; // 1 min entre disparos del mismo alerta
+  const fired = {}; // alertId -> timestamp último disparo
 
-  // Cooldown por alerta para evitar spam (ms)
-  const COOLDOWN_MS = 60 * 1000; // 1 minuto entre disparos del mismo alerta
-
-  // Registro de últimos disparos por alerta ID
-  const lastTriggered = {};
-
-  // ===== PERMISOS DE NOTIFICACIÓN =====
-  /**
-   * @description Solicita permiso del navegador para notificaciones push.
-   * Solo pide si no se ha pedido antes.
-   */
+  /** @description Solicita permiso de notificaciones al navegador. */
   async function requestPermissions() {
     if (!('Notification' in window)) return;
     if (Notification.permission === 'default') {
-      try {
-        const perm = await Notification.requestPermission();
-        console.log('[Alerts] Permiso de notificación:', perm);
-      } catch (e) {
-        console.warn('[Alerts] No se pudo obtener permiso:', e);
-      }
+      await Notification.requestPermission().catch(() => {});
     }
   }
 
-  // ===== COMPROBACIÓN DE ALERTAS DE PRECIO =====
+  // ===== COMPROBACIONES POR TIPO =====
+
   /**
-   * @description Comprueba alertas de precio para un par dado.
-   * Se llama desde binance.js cuando llega cada actualización de precio.
-   * @param {string} pair - Símbolo del par
-   * @param {number} price - Precio actual
+   * @description Comprueba todas las alertas activas para un par dado tras recibir precio nuevo.
+   * @param {string} pair @param {number} price @param {Object} ind - indicadores actuales
    */
-  function checkPriceAlerts(pair, price) {
-    const relevant = App.alerts.filter(a =>
-      a.active &&
-      a.pair === pair &&
-      (a.alert_type === 'PRICE_ABOVE' || a.alert_type === 'PRICE_BELOW')
-    );
-
-    relevant.forEach(alert => {
-      if (isCoolingDown(alert.id)) return;
-
-      const shouldTrigger =
-        (alert.alert_type === 'PRICE_ABOVE' && price >= alert.threshold) ||
-        (alert.alert_type === 'PRICE_BELOW' && price <= alert.threshold);
-
-      if (shouldTrigger) {
-        const msg = alert.alert_type === 'PRICE_ABOVE'
-          ? `${pair} subió a $${price.toFixed(2)} (umbral: $${alert.threshold})`
-          : `${pair} bajó a $${price.toFixed(2)} (umbral: $${alert.threshold})`;
-
-        triggerAlert(alert, msg);
-      }
-    });
+  function checkAll(pair, price, ind) {
+    if (!App.config.notificationsOn) return;
+    const active = App.alerts.filter(a => a.active && a.pair === pair);
+    active.forEach(a => evaluate(a, price, ind));
   }
 
   /**
-   * @description Comprueba alertas de RSI para un par dado.
-   * Se llama desde ui.js cuando se recalculan los indicadores.
-   * @param {string} pair
-   * @param {number} rsiValue
+   * @description Evalúa si una alerta debe dispararse.
+   * @param {Object} a - alerta @param {number} price @param {Object} ind
    */
-  function checkRSIAlerts(pair, rsiValue) {
-    const relevant = App.alerts.filter(a =>
-      a.active &&
-      a.pair === pair &&
-      (a.alert_type === 'RSI_ABOVE' || a.alert_type === 'RSI_BELOW')
-    );
+  function evaluate(a, price, ind) {
+    if (isCooling(a.id)) return;
+    const rsi  = ind?.rsi?.value  ?? null;
+    const macd = ind?.macd        ?? {};
+    let trigger = false;
 
-    relevant.forEach(alert => {
-      if (isCoolingDown(alert.id)) return;
+    switch (a.alert_type) {
+      case 'PRICE_REACH':
+        trigger = Math.abs(price - a.threshold) / a.threshold < 0.002; // ±0.2%
+        break;
+      case 'PRICE_BREAKOUT':
+        trigger = price > a.threshold;
+        break;
+      case 'PRICE_SUPPORT':
+        trigger = price < a.threshold;
+        break;
+      case 'CHANGE_PCT_UP':
+        trigger = (App.priceData[a.pair]?.change ?? 0) > a.threshold;
+        break;
+      case 'CHANGE_PCT_DOWN':
+        trigger = (App.priceData[a.pair]?.change ?? 0) < -Math.abs(a.threshold);
+        break;
+      case 'CHANGE_24H_UP':
+        trigger = (App.priceData[a.pair]?.change ?? 0) > a.threshold;
+        break;
+      case 'RSI_BELOW':
+        trigger = rsi !== null && rsi < a.threshold;
+        break;
+      case 'RSI_ABOVE':
+        trigger = rsi !== null && rsi > a.threshold;
+        break;
+      case 'MACD_BULLISH_CROSS':
+        trigger = macd.trend === 'bullish_cross';
+        break;
+      case 'MACD_BEARISH_CROSS':
+        trigger = macd.trend === 'bearish_cross';
+        break;
+    }
 
-      const shouldTrigger =
-        (alert.alert_type === 'RSI_ABOVE' && rsiValue >= alert.threshold) ||
-        (alert.alert_type === 'RSI_BELOW' && rsiValue <= alert.threshold);
-
-      if (shouldTrigger) {
-        const msg = alert.alert_type === 'RSI_ABOVE'
-          ? `RSI de ${pair} subió a ${rsiValue.toFixed(1)} (umbral: ${alert.threshold})`
-          : `RSI de ${pair} bajó a ${rsiValue.toFixed(1)} (umbral: ${alert.threshold})`;
-
-        triggerAlert(alert, msg);
-      }
-    });
+    if (trigger) fire(a, price);
   }
 
   /**
-   * @description Comprueba alertas de señal para un par dado.
-   * @param {string} pair
-   * @param {string} signalType - 'BUY' | 'SELL' | 'WAIT'
+   * @description Dispara la alerta: push + sonido + toast + actualiza estado.
+   * @param {Object} a @param {number} price
    */
-  function checkSignalAlerts(pair, signalType) {
-    const relevant = App.alerts.filter(a =>
-      a.active &&
-      a.pair === pair &&
-      a.alert_type === 'SIGNAL' &&
-      a.signal_target === signalType
-    );
+  async function fire(a, price) {
+    fired[a.id] = Date.now();
 
-    relevant.forEach(alert => {
-      if (isCoolingDown(alert.id)) return;
-      triggerAlert(alert, `Señal ${signalType} detectada en ${pair}`);
-    });
+    const msg = buildMsg(a, price);
+    UI.showToast(`🔔 ${msg}`, 'warning', 7000);
+    pushNotification(`GammaTR — ${a.pair}`, msg);
+    if (App.config.soundOn) beep();
+    highlightRow(a.pair);
+
+    // Marcar como disparada
+    a.active       = false;
+    a.triggered_at = new Date().toISOString();
+
+    await SupabaseClient.updateAlert(a.id, { active: false, triggered_at: a.triggered_at }).catch(() => {});
+    UI.renderAlerts();
   }
 
-  // ===== DISPARO DE ALERTA =====
-  /**
-   * @description Dispara una alerta: notificación push + sonido + toast + actualización de estado.
-   * @param {Object} alert - El objeto alerta
-   * @param {string} message - Mensaje descriptivo
-   */
-  async function triggerAlert(alert, message) {
-    console.log('[Alerts] Disparando:', message);
-
-    // Registrar cooldown
-    lastTriggered[alert.id] = Date.now();
-
-    // 1. Toast en la app
-    UI.showToast(`🔔 ${message}`, 'warning', 6000);
-
-    // 2. Notificación del navegador
-    sendBrowserNotification(`GammaTR — ${alert.pair}`, message);
-
-    // 3. Sonido de alerta
-    playAlertSound();
-
-    // 4. Highlight visual en la tabla (parpadeo de la fila)
-    highlightPairRow(alert.pair);
-
-    // 5. Marcar como disparada en estado local
-    alert.triggered_at = new Date().toISOString();
-    alert.active = false;
-
-    // 6. Actualizar en Supabase
-    await SupabaseClient.updateAlert(alert.id, {
-      active: false,
-      triggered_at: alert.triggered_at,
-    }).catch(() => {});
-
-    // 7. Actualizar badge y lista de alertas
-    UI.renderAlertsList();
+  /** @description Construye texto descriptivo del disparo. */
+  function buildMsg(a, price) {
+    const p = (n) => Number(n).toFixed(n >= 100 ? 2 : 4);
+    const map = {
+      PRICE_REACH:      `${a.pair} alcanzó $${p(price)} (objetivo $${p(a.threshold)})`,
+      PRICE_BREAKOUT:   `${a.pair} rompió $${p(a.threshold)} ↑ Precio: $${p(price)}`,
+      PRICE_SUPPORT:    `${a.pair} cayó a $${p(price)} (soporte $${p(a.threshold)})`,
+      CHANGE_PCT_UP:    `${a.pair} subió +${a.threshold}% en el timeframe`,
+      CHANGE_PCT_DOWN:  `${a.pair} cayó -${Math.abs(a.threshold)}% en el timeframe`,
+      CHANGE_24H_UP:    `${a.pair} cambio 24h supera +${a.threshold}%`,
+      RSI_BELOW:        `RSI de ${a.pair} bajó de ${a.threshold} → posible compra`,
+      RSI_ABOVE:        `RSI de ${a.pair} subió de ${a.threshold} → posible venta`,
+      MACD_BULLISH_CROSS: `MACD bullish cross en ${a.pair} ↑`,
+      MACD_BEARISH_CROSS: `MACD bearish cross en ${a.pair} ↓`,
+    };
+    return map[a.alert_type] || `Alerta ${a.pair} disparada`;
   }
 
-  // ===== NOTIFICACIÓN DEL NAVEGADOR =====
-  /**
-   * @description Envía una notificación push del navegador si hay permiso.
-   * @param {string} title
-   * @param {string} body
-   */
-  function sendBrowserNotification(title, body) {
-    if (!('Notification' in window)) return;
+  /** @description Descripción corta para la lista de alertas. */
+  function describeAlert(a) {
+    const map = {
+      PRICE_REACH:      `Precio ≈ $${a.threshold}`,
+      PRICE_BREAKOUT:   `Precio > $${a.threshold}`,
+      PRICE_SUPPORT:    `Precio < $${a.threshold}`,
+      CHANGE_PCT_UP:    `Cambio % > +${a.threshold}%`,
+      CHANGE_PCT_DOWN:  `Cambio % < -${Math.abs(a.threshold)}%`,
+      CHANGE_24H_UP:    `24h > +${a.threshold}%`,
+      RSI_BELOW:        `RSI < ${a.threshold}`,
+      RSI_ABOVE:        `RSI > ${a.threshold}`,
+      MACD_BULLISH_CROSS: 'MACD cruce alcista',
+      MACD_BEARISH_CROSS: 'MACD cruce bajista',
+    };
+    return map[a.alert_type] || a.alert_type;
+  }
+
+  // ===== HELPERS =====
+
+  function isCooling(id) {
+    return fired[id] && (Date.now() - fired[id]) < COOLDOWN;
+  }
+
+  function pushNotification(title, body) {
     if (Notification.permission !== 'granted') return;
-
     try {
-      const notification = new Notification(title, {
-        body,
-        icon: './icons/icon-192.png',
-        badge: './icons/icon-192.png',
-        tag: 'gammatr-alert',  // Reemplaza notificaciones anteriores del mismo tag
-        renotify: true,
-        vibrate: [200, 100, 200],
-      });
-
-      notification.onclick = () => {
-        window.focus();
-        notification.close();
-      };
-
-      setTimeout(() => notification.close(), 10000);
-    } catch (err) {
-      console.warn('[Alerts] Error en notificación:', err);
-    }
+      const n = new Notification(title, { body, icon: './icons/icon-192.png', tag: 'gammatr' });
+      setTimeout(() => n.close(), 8000);
+    } catch (e) {}
   }
 
-  // ===== SONIDO =====
-  /**
-   * @description Reproduce el sonido de alerta.
-   * Genera un beep sintético usando Web Audio API como fallback.
-   */
-  function playAlertSound() {
-    try {
-      // Intentar con el elemento audio del HTML
-      const audio = document.getElementById('alertSound');
-      if (audio && audio.src && audio.src !== window.location.href) {
-        audio.volume = 0.5;
-        audio.play().catch(() => playBeep());
-        return;
-      }
-      playBeep();
-    } catch(e) {
-      playBeep();
-    }
-  }
-
-  /**
-   * @description Genera un beep sintético de alerta usando Web Audio API.
-   */
-  function playBeep() {
+  function beep() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const frequencies = [880, 1100, 880]; // Patrón de alerta
-
-      let time = ctx.currentTime;
-      frequencies.forEach(freq => {
+      [880, 1100, 880].forEach((freq, i) => {
         const osc  = ctx.createOscillator();
         const gain = ctx.createGain();
-
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-
-        osc.frequency.value = freq;
-        osc.type = 'sine';
-        gain.gain.setValueAtTime(0.3, time);
-        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
-
-        osc.start(time);
-        osc.stop(time + 0.15);
-        time += 0.2;
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.frequency.value = freq; osc.type = 'sine';
+        const t = ctx.currentTime + i * 0.18;
+        gain.gain.setValueAtTime(0.25, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+        osc.start(t); osc.stop(t + 0.15);
       });
-    } catch (e) {
-      // Sin audio disponible — silencio
-    }
+    } catch (e) {}
   }
 
-  // ===== HIGHLIGHT VISUAL =====
-  /**
-   * @description Aplica un parpadeo visual a la fila de la tabla para un par.
-   * @param {string} pair
-   */
-  function highlightPairRow(pair) {
-    const row = document.querySelector(`#pricesBody tr[data-pair="${pair}"]`);
+  function highlightRow(pair) {
+    const row = document.querySelector(`[data-pair="${pair}"]`);
     if (!row) return;
-
-    row.style.transition = 'background 0.2s ease';
-    const flashes = [
-      { bg: 'rgba(255,167,38,0.3)', delay: 0 },
-      { bg: '',                     delay: 300 },
-      { bg: 'rgba(255,167,38,0.3)', delay: 600 },
-      { bg: '',                     delay: 900 },
-    ];
-
-    flashes.forEach(({ bg, delay }) => {
-      setTimeout(() => { row.style.background = bg; }, delay);
-    });
+    const colors = ['rgba(255,167,38,.3)', '', 'rgba(255,167,38,.3)', ''];
+    colors.forEach((bg, i) => setTimeout(() => { row.style.background = bg; }, i * 300));
   }
 
-  // ===== COOLDOWN CHECK =====
-  /**
-   * @description Comprueba si una alerta está en período de enfriamiento.
-   * @param {string|number} alertId
-   * @returns {boolean}
-   */
-  function isCoolingDown(alertId) {
-    const last = lastTriggered[alertId];
-    if (!last) return false;
-    return (Date.now() - last) < COOLDOWN_MS;
-  }
-
-  // ===== COMPROBAR TODAS LAS ALERTAS =====
-  /**
-   * @description Punto de entrada para comprobar todas las alertas de un par.
-   * Recibe el estado completo del par.
-   * @param {string} pair
-   * @param {number} price
-   * @param {Object} indicators
-   */
-  function checkAll(pair, price, indicators) {
-    checkPriceAlerts(pair, price);
-    if (indicators?.rsi?.value !== undefined) {
-      checkRSIAlerts(pair, indicators.rsi.value);
-    }
-  }
-
-  // API pública
-  return {
-    requestPermissions,
-    checkPriceAlerts,
-    checkRSIAlerts,
-    checkSignalAlerts,
-    checkAll,
-    triggerAlert,
-    playAlertSound,
-  };
-
+  return { requestPermissions, checkAll, evaluate, fire, describeAlert, beep };
 })();

@@ -1,230 +1,99 @@
 /**
  * @file supabase.js
- * @description Cliente Supabase para persistencia de señales, alertas e historial.
- * Opera en modo "graceful degradation": si Supabase no está configurado,
- * las operaciones se ignoran silenciosamente y la app sigue funcionando en modo local.
- * Expone window.SupabaseClient.
+ * @description Cliente Supabase. Degradación graceful: si no hay config, todo es no-op.
+ * Keys SIEMPRE de localStorage, nunca hardcodeadas.
  */
 window.SupabaseClient = (() => {
 
-  // IMPORTANTE: Las claves se leen SIEMPRE de localStorage, nunca hardcodeadas
-  const SUPABASE_URL = () =>
-    localStorage.getItem('gammatr_supabase_url') || 'YOUR_SUPABASE_URL_HERE';
-  const SUPABASE_KEY = () =>
-    localStorage.getItem('gammatr_supabase_key') || 'YOUR_SUPABASE_ANON_KEY_HERE';
+  const SB_URL = () => localStorage.getItem('gammatr_supabase_url') || '';
+  const SB_KEY = () => localStorage.getItem('gammatr_supabase_key') || '';
 
-  let client = null; // Instancia del cliente Supabase
+  let db = null;
 
   /**
-   * @description Inicializa el cliente Supabase con URL y clave.
-   * @param {string} url - URL del proyecto Supabase
-   * @param {string} key - Clave anon del proyecto
+   * @description Inicializa el cliente Supabase.
+   * @param {string} url @param {string} key
    */
   function init(url, key) {
-    if (!url || !key || url === 'YOUR_SUPABASE_URL_HERE') {
-      console.log('[Supabase] No configurado — modo local activo');
-      client = null;
-      return;
-    }
-
+    if (!url || !key) { db = null; return; }
     try {
-      // Supabase JS v2 vía CDN expone createClient en window.supabase
-      client = window.supabase.createClient(url, key, {
-        auth: { persistSession: false },
-        realtime: { enabled: false }, // No usamos realtime de Supabase (usamos Binance WS)
-      });
-      console.log('[Supabase] Cliente inicializado ✓');
-    } catch (err) {
-      console.warn('[Supabase] Error al inicializar:', err.message);
-      client = null;
+      db = window.supabase.createClient(url, key, { auth: { persistSession: false } });
+      console.log('[Supabase] Inicializado ✓');
+    } catch (e) {
+      console.warn('[Supabase] Error al inicializar:', e.message);
+      db = null;
     }
   }
 
-  /**
-   * @description Comprueba si el cliente está disponible.
-   * @returns {boolean}
-   */
-  function isAvailable() {
-    return client !== null;
-  }
+  const ok = () => db !== null;
 
-  // ===== SEÑALES =====
+  // ===== SIGNALS =====
 
-  /**
-   * @description Guarda una señal en la tabla `signals`.
-   * @param {Object} signal - { pair, signal_type, score, price, rsi, macd, ema_cross, gemini_analysis }
-   * @returns {Promise<Object|null>} - El registro guardado o null si falla/no está configurado
-   */
+  /** @description Guarda una señal. @param {Object} signal @returns {Promise<Object|null>} */
   async function saveSignal(signal) {
-    if (!isAvailable()) return null;
+    if (!ok()) return null;
     try {
-      const { data, error } = await client
-        .from('signals')
-        .insert([signal])
-        .select()
-        .single();
-
+      const { data, error } = await db.from('signals').insert([signal]).select().single();
       if (error) throw error;
-      console.log('[Supabase] Señal guardada:', data.id);
       return data;
-    } catch (err) {
-      console.warn('[Supabase] Error guardando señal:', err.message);
-      return null;
-    }
+    } catch (e) { console.warn('[Supabase] saveSignal:', e.message); return null; }
   }
 
-  /**
-   * @description Obtiene el historial de señales.
-   * @param {string|null} pair - Filtrar por par (null = todos)
-   * @param {number} limit - Máximo de registros a obtener
-   * @returns {Promise<Array>}
-   */
-  async function getSignalHistory(pair = null, limit = 100) {
-    if (!isAvailable()) return [];
+  /** @description Historial de señales. @param {string|null} pair @param {number} limit */
+  async function getSignals(pair = null, limit = 100) {
+    if (!ok()) return [];
     try {
-      let query = client
-        .from('signals')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(limit);
-
-      if (pair) query = query.eq('pair', pair);
-
-      const { data, error } = await query;
+      let q = db.from('signals').select('*').order('created_at', { ascending: false }).limit(limit);
+      if (pair) q = q.eq('pair', pair);
+      const { data, error } = await q;
       if (error) throw error;
       return data || [];
-    } catch (err) {
-      console.warn('[Supabase] Error obteniendo historial:', err.message);
-      return [];
-    }
+    } catch (e) { console.warn('[Supabase] getSignals:', e.message); return []; }
   }
 
-  /**
-   * @description Obtiene estadísticas de señales por par.
-   * @param {string} pair
-   * @returns {Promise<{ BUY: number, SELL: number, WAIT: number }>}
-   */
-  async function getSignalStats(pair) {
-    if (!isAvailable()) return { BUY: 0, SELL: 0, WAIT: 0 };
-    try {
-      const { data, error } = await client
-        .from('signals')
-        .select('signal_type')
-        .eq('pair', pair);
+  // ===== ALERTS =====
 
-      if (error) throw error;
-      const stats = { BUY: 0, SELL: 0, WAIT: 0 };
-      (data || []).forEach(s => {
-        if (stats[s.signal_type] !== undefined) stats[s.signal_type]++;
-      });
-      return stats;
-    } catch (err) {
-      return { BUY: 0, SELL: 0, WAIT: 0 };
-    }
-  }
-
-  // ===== ALERTAS =====
-
-  /**
-   * @description Guarda una nueva alerta.
-   * @param {Object} alert - { pair, alert_type, threshold, signal_target, active }
-   * @returns {Promise<Object|null>}
-   */
+  /** @description Guarda una alerta. */
   async function saveAlert(alert) {
-    if (!isAvailable()) return null;
+    if (!ok()) return null;
     try {
-      const { data, error } = await client
-        .from('alerts')
-        .insert([alert])
-        .select()
-        .single();
-
+      const { data, error } = await db.from('alerts').insert([alert]).select().single();
       if (error) throw error;
       return data;
-    } catch (err) {
-      console.warn('[Supabase] Error guardando alerta:', err.message);
-      return null;
-    }
+    } catch (e) { console.warn('[Supabase] saveAlert:', e.message); return null; }
   }
 
-  /**
-   * @description Obtiene todas las alertas activas.
-   * @returns {Promise<Array>}
-   */
+  /** @description Obtiene todas las alertas. */
   async function getAlerts() {
-    if (!isAvailable()) return [];
+    if (!ok()) return [];
     try {
-      const { data, error } = await client
-        .from('alerts')
-        .select('*')
-        .order('created_at', { ascending: false });
-
+      const { data, error } = await db.from('alerts').select('*').order('created_at', { ascending: false });
       if (error) throw error;
       return data || [];
-    } catch (err) {
-      console.warn('[Supabase] Error obteniendo alertas:', err.message);
-      return [];
-    }
+    } catch (e) { console.warn('[Supabase] getAlerts:', e.message); return []; }
   }
 
-  /**
-   * @description Actualiza una alerta (ej: marcarla como disparada).
-   * @param {string} id - UUID de la alerta
-   * @param {Object} updates - Campos a actualizar
-   * @returns {Promise<void>}
-   */
+  /** @description Actualiza una alerta (ej: marcar como disparada). */
   async function updateAlert(id, updates) {
-    if (!isAvailable()) return;
+    if (!ok()) return;
     try {
-      const { error } = await client
-        .from('alerts')
-        .update(updates)
-        .eq('id', id);
-
+      const { error } = await db.from('alerts').update(updates).eq('id', id);
       if (error) throw error;
-    } catch (err) {
-      console.warn('[Supabase] Error actualizando alerta:', err.message);
-    }
+    } catch (e) { console.warn('[Supabase] updateAlert:', e.message); }
   }
 
-  /**
-   * @description Elimina una alerta por ID.
-   * @param {string} id
-   * @returns {Promise<void>}
-   */
+  /** @description Elimina una alerta. */
   async function deleteAlert(id) {
-    if (!isAvailable()) return;
+    if (!ok()) return;
     try {
-      const { error } = await client
-        .from('alerts')
-        .delete()
-        .eq('id', id);
-
+      const { error } = await db.from('alerts').delete().eq('id', id);
       if (error) throw error;
-    } catch (err) {
-      console.warn('[Supabase] Error eliminando alerta:', err.message);
-    }
+    } catch (e) { console.warn('[Supabase] deleteAlert:', e.message); }
   }
 
-  // ===== INICIALIZACIÓN AUTOMÁTICA =====
-  // Intentar inicializar al cargar si ya hay claves guardadas
-  const storedUrl = localStorage.getItem('gammatr_supabase_url');
-  const storedKey = localStorage.getItem('gammatr_supabase_key');
-  if (storedUrl && storedKey) {
-    init(storedUrl, storedKey);
-  }
+  // Auto-init si ya hay claves guardadas
+  const u = SB_URL(), k = SB_KEY();
+  if (u && k) init(u, k);
 
-  // API pública
-  return {
-    init,
-    isAvailable,
-    saveSignal,
-    getSignalHistory,
-    getSignalStats,
-    saveAlert,
-    getAlerts,
-    updateAlert,
-    deleteAlert,
-  };
-
+  return { init, ok, saveSignal, getSignals, saveAlert, getAlerts, updateAlert, deleteAlert };
 })();

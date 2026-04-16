@@ -1,247 +1,150 @@
 /**
  * @file indicators.js
- * @description Cálculo de indicadores técnicos: RSI, MACD, EMA, Bollinger Bands.
- * Todas las funciones son puras (sin efectos secundarios).
- * Expone window.Indicators.
+ * @description Indicadores técnicos con arrays alineados para Chart.js.
  */
 window.Indicators = (() => {
 
-  // ===== EMA =====
-  /**
-   * @description Calcula la Media Móvil Exponencial (EMA).
-   * @param {number[]} closes - Array de precios de cierre (orden cronológico)
-   * @param {number} period - Período de la EMA
-   * @returns {number[]} - Array de valores EMA
-   */
+  /** EMA clásica. result[0] = closes[period-1]. */
   function ema(closes, period) {
     if (closes.length < period) return [];
     const k = 2 / (period + 1);
-    const result = [];
-
-    // SMA inicial para el primer valor
-    let sum = 0;
-    for (let i = 0; i < period; i++) sum += closes[i];
-    let emaVal = sum / period;
-    result.push(emaVal);
-
+    let val = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    const result = [val];
     for (let i = period; i < closes.length; i++) {
-      emaVal = closes[i] * k + emaVal * (1 - k);
-      result.push(emaVal);
+      val = closes[i] * k + val * (1 - k);
+      result.push(val);
     }
-
     return result;
   }
 
-  /**
-   * @description Devuelve el último valor de EMA para un período dado.
-   * @param {number[]} closes
-   * @param {number} period
-   * @returns {number|null}
-   */
-  function lastEMA(closes, period) {
-    const arr = ema(closes, period);
-    return arr.length ? arr[arr.length - 1] : null;
+  /** EMA alineada con closes (nulls en warmup). */
+  function emaAligned(closes, period) {
+    return [...new Array(period - 1).fill(null), ...ema(closes, period)];
   }
 
-  // ===== RSI =====
-  /**
-   * @description Calcula el RSI (Relative Strength Index).
-   * @param {number[]} closes - Array de cierres
-   * @param {number} period - Período (14 por defecto)
-   * @returns {{ value: number, signal: string }}
-   */
-  function calculateRSI(closes, period = 14) {
-    if (closes.length < period + 1) return { value: 50, signal: 'neutral' };
-
-    let gains = 0, losses = 0;
-
-    // Cálculo inicial de ganancias y pérdidas promedio
+  /** RSI array alineado. */
+  function rsiAligned(closes, period = 14) {
+    const result = new Array(period).fill(null);
+    if (closes.length <= period) return result;
+    let avgGain = 0, avgLoss = 0;
     for (let i = 1; i <= period; i++) {
-      const diff = closes[i] - closes[i - 1];
-      if (diff >= 0) gains  += diff;
-      else           losses -= diff;
+      const d = closes[i] - closes[i - 1];
+      if (d > 0) avgGain += d; else avgLoss -= d;
     }
-
-    let avgGain = gains / period;
-    let avgLoss = losses / period;
-
-    // Suavizado de Wilder para el resto
+    avgGain /= period; avgLoss /= period;
+    const toRSI = (g, l) => l === 0 ? 100 : +(100 - 100 / (1 + g / l)).toFixed(2);
+    result.push(toRSI(avgGain, avgLoss));
     for (let i = period + 1; i < closes.length; i++) {
-      const diff = closes[i] - closes[i - 1];
-      const gain = diff >= 0 ? diff : 0;
-      const loss = diff < 0  ? -diff : 0;
-      avgGain = (avgGain * (period - 1) + gain) / period;
-      avgLoss = (avgLoss * (period - 1) + loss) / period;
+      const d = closes[i] - closes[i - 1];
+      avgGain = (avgGain * (period - 1) + (d > 0 ? d : 0)) / period;
+      avgLoss = (avgLoss * (period - 1) + (d < 0 ? -d : 0)) / period;
+      result.push(toRSI(avgGain, avgLoss));
     }
-
-    const rs    = avgLoss === 0 ? 100 : avgGain / avgLoss;
-    const value = parseFloat((100 - 100 / (1 + rs)).toFixed(2));
-
-    let signal = 'neutral';
-    if (value < 30) signal = 'oversold';   // Sobreventa → posible compra
-    else if (value > 70) signal = 'overbought'; // Sobrecompra → posible venta
-
-    return { value, signal };
+    return result;
   }
 
-  // ===== MACD =====
-  /**
-   * @description Calcula el MACD (Moving Average Convergence Divergence).
-   * @param {number[]} closes
-   * @param {number} fastPeriod - EMA rápida (12)
-   * @param {number} slowPeriod - EMA lenta (26)
-   * @param {number} signalPeriod - Señal (9)
-   * @returns {{ macd: number, signal: number, histogram: number, trend: string }}
-   */
-  function calculateMACD(closes, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
-    if (closes.length < slowPeriod + signalPeriod) {
-      return { macd: 0, signal: 0, histogram: 0, trend: 'neutral' };
-    }
-
-    const fastEMA = ema(closes, fastPeriod);
-    const slowEMA = ema(closes, slowPeriod);
-
-    // La EMA lenta empieza en index (slowPeriod - 1) del array de cierres
-    // La EMA rápida empieza antes — alinear por el final
-    const offset = fastEMA.length - slowEMA.length;
-    const macdLine = slowEMA.map((s, i) => fastEMA[i + offset] - s);
-
-    const signalLine = ema(macdLine, signalPeriod);
-    const lastMACD   = macdLine[macdLine.length - 1];
-    const lastSignal = signalLine[signalLine.length - 1];
-    const histogram  = parseFloat((lastMACD - lastSignal).toFixed(6));
-
-    let trend = 'neutral';
-    if (histogram > 0 && macdLine[macdLine.length - 2] < signalLine[signalLine.length - 2]) {
-      trend = 'bullish_cross'; // Cruce alcista reciente
-    } else if (histogram < 0 && macdLine[macdLine.length - 2] > signalLine[signalLine.length - 2]) {
-      trend = 'bearish_cross'; // Cruce bajista reciente
-    } else if (histogram > 0) {
-      trend = 'bullish';
-    } else {
-      trend = 'bearish';
-    }
-
+  /** MACD/Signal/Hist arrays alineados. */
+  function macdAligned(closes, fast = 12, slow = 26, sig = 9) {
+    const len = closes.length;
+    const empty = () => new Array(len).fill(null);
+    const fastE = ema(closes, fast);
+    const slowE = ema(closes, slow);
+    if (!slowE.length) return { macdArr: empty(), signalArr: empty(), histArr: empty() };
+    const off = fastE.length - slowE.length;
+    const macdLine   = slowE.map((s, i) => fastE[i + off] - s);
+    const signalLine = ema(macdLine, sig);
+    const histOff    = macdLine.length - signalLine.length;
+    const histogram  = signalLine.map((s, i) => macdLine[i + histOff] - s);
     return {
-      macd:      parseFloat(lastMACD.toFixed(6)),
-      signal:    parseFloat(lastSignal.toFixed(6)),
-      histogram: parseFloat(histogram.toFixed(6)),
-      trend,
+      macdArr:   [...new Array(slow - 1).fill(null),           ...macdLine],
+      signalArr: [...new Array(slow - 1 + sig - 1).fill(null), ...signalLine],
+      histArr:   [...new Array(slow - 1 + sig - 1).fill(null), ...histogram],
     };
   }
 
-  // ===== BOLLINGER BANDS =====
-  /**
-   * @description Calcula las Bandas de Bollinger.
-   * @param {number[]} closes
-   * @param {number} period - Período de la SMA (20)
-   * @param {number} stdDevMultiplier - Multiplicador de desviación estándar (2)
-   * @returns {{ upper: number, middle: number, lower: number, bandwidth: number, percentB: number }}
-   */
-  function calculateBollingerBands(closes, period = 20, stdDevMultiplier = 2) {
+  /** Bollinger Bands. */
+  function calculateBB(closes, period = 20, mult = 2) {
     if (closes.length < period) {
-      const price = closes[closes.length - 1] || 0;
-      return { upper: price, middle: price, lower: price, bandwidth: 0, percentB: 50 };
+      const p = closes[closes.length - 1] || 0;
+      return { upper: p, middle: p, lower: p, percentB: 50, bandwidth: 0 };
     }
-
-    // Usar los últimos `period` cierres
     const slice = closes.slice(-period);
-    const sma = slice.reduce((a, b) => a + b, 0) / period;
-
-    // Desviación estándar poblacional
-    const variance = slice.reduce((sum, v) => sum + Math.pow(v - sma, 2), 0) / period;
-    const stdDev   = Math.sqrt(variance);
-
-    const upper = sma + stdDevMultiplier * stdDev;
-    const lower = sma - stdDevMultiplier * stdDev;
-    const bandwidth = upper - lower === 0 ? 0 : ((upper - lower) / sma) * 100;
+    const sma   = slice.reduce((a, b) => a + b, 0) / period;
+    const std   = Math.sqrt(slice.reduce((s, v) => s + (v - sma) ** 2, 0) / period);
+    const upper = sma + mult * std, lower = sma - mult * std;
     const price = closes[closes.length - 1];
-    const percentB = upper - lower === 0 ? 50 : ((price - lower) / (upper - lower)) * 100;
-
     return {
-      upper:     parseFloat(upper.toFixed(8)),
-      middle:    parseFloat(sma.toFixed(8)),
-      lower:     parseFloat(lower.toFixed(8)),
-      bandwidth: parseFloat(bandwidth.toFixed(2)),
-      percentB:  parseFloat(percentB.toFixed(2)),
+      upper, middle: sma, lower,
+      percentB:  upper === lower ? 50 : ((price - lower) / (upper - lower)) * 100,
+      bandwidth: sma === 0 ? 0 : ((upper - lower) / sma) * 100,
     };
   }
 
-  // ===== VOLUMEN (OBV simplificado) =====
   /**
-   * @description Calcula On-Balance Volume simplificado para detectar tendencia de volumen.
-   * @param {Array} klines - Array de { close, volume }
-   * @returns {{ trend: 'rising'|'falling'|'neutral' }}
+   * @description Construye todos los datos para los 3 charts + tarjetas educativas.
+   * @param {Array} klines - [{ time, open, high, low, close, volume }]
+   * @returns {{ last: Object, arrays: Object }}
    */
-  function calculateVolumeTrend(klines) {
-    if (klines.length < 10) return { trend: 'neutral' };
-    const recent = klines.slice(-10);
-    let obv = 0;
-    const obvArr = [0];
-    for (let i = 1; i < recent.length; i++) {
-      if (recent[i].close > recent[i-1].close)      obv += recent[i].volume;
-      else if (recent[i].close < recent[i-1].close) obv -= recent[i].volume;
-      obvArr.push(obv);
-    }
-    const slope = obvArr[obvArr.length - 1] - obvArr[0];
-    return { trend: slope > 0 ? 'rising' : slope < 0 ? 'falling' : 'neutral', obv: parseFloat(obv.toFixed(2)) };
-  }
+  function buildChartData(klines) {
+    const closes = klines.map(k => k.close);
+    const times  = klines.map(k => k.time);
 
-  // ===== CÁLCULO CONJUNTO =====
-  /**
-   * @description Calcula todos los indicadores para un array de velas.
-   * @param {number[]} closes - Array de precios de cierre
-   * @param {Array} klines - Array completo de velas { time, open, high, low, close, volume }
-   * @returns {Object} - Todos los indicadores calculados
-   */
-  function calculateAll(closes, klines = []) {
-    const rsi  = calculateRSI(closes);
-    const macd = calculateMACD(closes);
-    const bb   = calculateBollingerBands(closes);
+    const ema9Arr  = emaAligned(closes, 9);
+    const ema21Arr = emaAligned(closes, 21);
+    const rsiArr   = rsiAligned(closes, 14);
+    const { macdArr, signalArr, histArr } = macdAligned(closes);
 
-    const ema9Val  = lastEMA(closes, 9);
-    const ema21Val = lastEMA(closes, 21);
-    const ema50Val = lastEMA(closes, 50);
+    const toXY = (arr) => arr.map((v, i) =>
+      v !== null ? { x: times[i], y: +Number(v).toFixed(6) } : null);
 
-    // Detectar cruce EMA 9/21
+    const arrays = {
+      candle: klines.map(k => ({ x: k.time, o: k.open, h: k.high, l: k.low, c: k.close })),
+      ema9:   toXY(ema9Arr),
+      ema21:  toXY(ema21Arr),
+      macd:   toXY(macdArr),
+      signal: toXY(signalArr),
+      hist:   toXY(histArr),
+      rsi:    toXY(rsiArr),
+    };
+
+    const lastOf  = arr => [...arr].reverse().find(v => v !== null) ?? 0;
+    const prevOf  = arr => { const v = arr.filter(x => x !== null); return v[v.length - 2] ?? 0; };
+
+    const lastEMA9  = lastOf(ema9Arr);
+    const lastEMA21 = lastOf(ema21Arr);
+    const lastRSI   = lastOf(rsiArr);
+    const lastMACD  = lastOf(macdArr);
+    const lastSig   = lastOf(signalArr);
+    const lastHist  = lastOf(histArr);
+    const prevHist  = prevOf(histArr);
+
+    let macdTrend = 'neutral';
+    if (prevHist <= 0 && lastHist > 0)       macdTrend = 'bullish_cross';
+    else if (prevHist >= 0 && lastHist < 0)  macdTrend = 'bearish_cross';
+    else if (lastHist > 0)                   macdTrend = 'bullish';
+    else if (lastHist < 0)                   macdTrend = 'bearish';
+
     let emaCross = 'neutral';
-    const ema9Arr  = ema(closes, 9);
-    const ema21Arr = ema(closes, 21);
-    const offset   = ema9Arr.length - ema21Arr.length;
-    if (ema9Arr.length >= 2 && ema21Arr.length >= 2) {
-      const prevDiff = ema9Arr[ema9Arr.length - 2] - ema21Arr[ema21Arr.length - 2 - offset + offset];
-      const currDiff = ema9Val - ema21Val;
-      if (prevDiff < 0 && currDiff >= 0) emaCross = 'bullish';
-      else if (prevDiff > 0 && currDiff <= 0) emaCross = 'bearish';
-      else emaCross = currDiff > 0 ? 'bullish' : 'bearish';
+    const pv9 = prevOf(ema9Arr), pv21 = prevOf(ema21Arr);
+    if (pv9 !== 0 && pv21 !== 0) {
+      if (pv9 <= pv21 && lastEMA9 > lastEMA21)       emaCross = 'bullish';
+      else if (pv9 >= pv21 && lastEMA9 < lastEMA21)  emaCross = 'bearish';
+      else emaCross = lastEMA9 > lastEMA21 ? 'bullish' : 'bearish';
     }
 
-    const volumeTrend = calculateVolumeTrend(klines);
+    const bb = calculateBB(closes);
 
     return {
-      rsi,
-      macd,
-      bb,
-      ema: {
-        ema9:  parseFloat((ema9Val || 0).toFixed(8)),
-        ema21: parseFloat((ema21Val || 0).toFixed(8)),
-        ema50: parseFloat((ema50Val || 0).toFixed(8)),
-        cross: emaCross,
+      arrays,
+      last: {
+        rsi:  { value: lastRSI },
+        macd: { macd: lastMACD, signal: lastSig, histogram: lastHist, trend: macdTrend },
+        ema:  { ema9: lastEMA9, ema21: lastEMA21, cross: emaCross },
+        bb, closes,
+        price: closes[closes.length - 1] || 0,
       },
-      volume: volumeTrend,
-      closes, // Pasar los cierres para uso en signals.js
     };
   }
 
-  // API pública
-  return {
-    ema,
-    lastEMA,
-    calculateRSI,
-    calculateMACD,
-    calculateBollingerBands,
-    calculateVolumeTrend,
-    calculateAll,
-  };
-
+  return { ema, emaAligned, rsiAligned, macdAligned, calculateBB, buildChartData };
 })();
