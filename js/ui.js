@@ -794,6 +794,29 @@ window.UI = (() => {
     });
   }
 
+  function setChartsLoading(on) {
+    const el = document.getElementById('chartsLoadingOverlay');
+    if (el) el.classList.toggle('hidden', !on);
+  }
+
+  function setGeminiLoading(on) {
+    const btn = document.getElementById('analyzeBtn');
+    const mob = document.getElementById('mobAnalyzeBtn');
+    const txt = on ? 'Analizando...' : 'Analizar con IA';
+    if (btn) { btn.disabled = on; btn.textContent = txt; }
+    if (mob) { mob.disabled = on; mob.textContent = txt; }
+  }
+
+  function highlightActivePair(pair) {
+    document.querySelectorAll('.wl-row').forEach(r => r.classList.remove('active'));
+    document.querySelector(`.wl-row[data-pair="${pair}"]`)?.classList.add('active');
+  }
+
+  function closeAlertModal() {
+    const modal = document.getElementById('alertModal');
+    if (modal) modal.classList.add('hidden');
+  }
+
   return {
     fmtPrice, fmtPct, fmtTime,
     renderWatchlist, renderWatchlistMobile, refreshPriceRow,
@@ -805,5 +828,6 @@ window.UI = (() => {
     selectPair, goTab,
     showToast,
     bindEvents,
+    setChartsLoading, setGeminiLoading, highlightActivePair, closeAlertModal,
   };
 })();

@@ -5,7 +5,7 @@
  * Permite uso offline parcial (UI carga, datos en vivo no disponibles).
  */
 
-const CACHE_NAME = 'gammatr-v1.0.1';
+const CACHE_NAME = 'gammatr-v1.0.2';
 
 // Assets a cachear en la instalación
 const STATIC_ASSETS = [

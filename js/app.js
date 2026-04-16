@@ -336,7 +336,7 @@
     UI.bindEvents();
     bindConfigHandlers();
 
-    await Binance.fetchTickers();
+    Binance.fetchTickers().catch(() => {}); // no bloquear si hay CORS
     Binance.connect(App.pairs, App.selectedTimeframe);
     await window.loadPairCharts(App.selectedPair, App.selectedTimeframe);
 
